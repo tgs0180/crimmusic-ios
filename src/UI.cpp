@@ -352,6 +352,19 @@ void UI::draw(Player& player, Library& library) {
 
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
+
+    // Points vs pixels: the UI is laid out in points (an iPhone is ~390 wide),
+    // but the screen has 3 pixels per point. Tell ImGui the real ratio, measured
+    // from the renderer itself. (On Apple devices the ImGui backend asks SDL for
+    // the "display scale" instead; when that number is wrong, everything is drawn
+    // too small in the top-left corner.)
+    int pixelW = 0, pixelH = 0, pointW = 0, pointH = 0;
+    SDL_GetRenderOutputSize(renderer, &pixelW, &pixelH);
+    SDL_GetWindowSize(window, &pointW, &pointH);
+    if (pointW > 0 && pointH > 0 && pixelW > 0 && pixelH > 0) {
+        ImGui::GetIO().DisplayFramebufferScale = ImVec2(static_cast<float>(pixelW) / pointW, static_cast<float>(pixelH) / pointH);
+    }
+
     ImGui::NewFrame();
     readTouch();
 
