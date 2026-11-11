@@ -40,6 +40,14 @@ namespace playback {
         player.play(library.currentSong());
     }
 
+    // Always the previous song (used by swiping the cover, where restarting
+    // the same song would look odd).
+    inline void previousTrack(Player& player, Library& library) {
+        if (library.empty()) return;
+        library.previous();
+        player.play(library.currentSong());
+    }
+
     // What to do when a song reaches its end.
     inline void songFinished(Player& player, Library& library) {
         if (library.empty()) return;

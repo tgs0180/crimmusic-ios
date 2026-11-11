@@ -86,12 +86,17 @@ class UI {
         bool sheetOpen = false;
         float sheetSlide = 0.0f;   // 0 = hidden, 1 = fully open
         float sheetDrag = 0.0f;    // how far it's being pulled down
-        bool sheetDragging = false;
+        // What the finger is doing on the now playing screen. Decided once it
+        // has moved a bit: sideways on the cover = change song, down = close.
+        enum class SheetGesture { None, PullDown, CoverSwipe, Ignored };
+        SheetGesture gesture = SheetGesture::None;
+        float coverOffset = 0.0f;  // sideways shift of the cover while/after swiping
+        float coverFlash = 0.0f;   // seconds left to show the play/pause icon on the cover
         bool seeking = false;
         float seekFraction = 0.0f;
         std::filesystem::path sheetSong;
         void drawNowPlaying(Player& player, Library& library, Area screen);
-        void drawNpCover(Area a, const Track& track);
+        void drawNpCover(Area a, const Track& track, float alpha);
         void drawNpProgress(Player& player, Area a, bool input);
         void drawNpControls(Player& player, Library& library, Area a, bool input);
         void drawNpLyrics(Player& player, const Track& track, Area a);

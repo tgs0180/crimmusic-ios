@@ -725,13 +725,7 @@ void UI::drawNowPlaying(Player& player, Library& library, Area screen) {
 
     dl->AddRectFilled(ImVec2(screen.x, screen.y), ImVec2(screen.x + screen.w, screen.y + screen.h + sheetDrag + 50), col(palette::base));
     if (library.empty()) return;
-    const Track& track = library.song(library.currentIndex());
-
-    // Only keep the big cover of the current song in memory.
-    if (track.file != sheetSong) {
-        bigCovers.forgetAllExcept(track.file);
-        sheetSong = track.file;
-    }
+    float dt = std::min(ImGui::GetIO().DeltaTime, 0.05f);
 
     const float side = 28.0f;
     float x = screen.x + insets.left + side;
@@ -759,7 +753,66 @@ void UI::drawNowPlaying(Player& player, Library& library, Area screen) {
     const float titleH = 66, progressH = 56, controlsH = 92, minLyrics = 120;
     float cover = std::clamp(bottom - y - titleH - progressH - controlsH - minLyrics - 24, 140.0f, w);
     float coverX = x + (w - cover) / 2;
-    drawNpCover(Area{ coverX, y, cover, cover }, track);
+    Area coverArea{ coverX, y, cover, cover };
+    float progressTop = y + cover + 22 + titleH;
+
+    // --- gestures, decided once the finger has moved far enough:
+    //   sideways on the cover            -> next / previous song
+    //   downwards, above the time bar    -> pull the screen closed
+    if (input && touch.pressed) gesture = SheetGesture::None;
+    if (input && touch.down && touch.moved && gesture == SheetGesture::None && !seeking) {
+        float dx = touch.x - touch.startX;
+        float dy = touch.y - touch.startY;
+        if (coverArea.contains(touch.startX, touch.startY) && std::fabs(dx) > std::fabs(dy)) gesture = SheetGesture::CoverSwipe;
+        else if (touch.startY < progressTop - 4 && dy > 0) gesture = SheetGesture::PullDown;
+        else gesture = SheetGesture::Ignored;
+    }
+    if (gesture == SheetGesture::CoverSwipe) {
+        float dx = touch.x - touch.startX;
+        if (touch.down) coverOffset = dx;          // the cover follows the finger
+        else {
+            float needed = std::min(90.0f, cover * 0.25f);
+            if (dx < -needed) {                    // swiped left: next song,
+                playback::next(player, library);   // which slides in from the right
+                coverOffset = cover + 40;
+            }
+            else if (dx > needed) {                // swiped right: previous song
+                playback::previousTrack(player, library);
+                coverOffset = -(cover + 40);
+            }
+            gesture = SheetGesture::None;          // not far enough: it springs back
+        }
+    }
+    if (gesture != SheetGesture::CoverSwipe) {
+        coverOffset += (0.0f - coverOffset) * std::min(1.0f, dt * 14.0f);
+        if (std::fabs(coverOffset) < 0.5f) coverOffset = 0.0f;
+    }
+    if (input && tapped(coverArea)) {
+        playback::toggle(player, library);
+        coverFlash = 0.7f;
+    }
+
+    // (read the song only now, because a swipe may just have changed it)
+    const Track& track = library.song(library.currentIndex());
+    // Only keep the big cover of the current song in memory.
+    if (track.file != sheetSong) {
+        bigCovers.forgetAllExcept(track.file);
+        sheetSong = track.file;
+    }
+
+    float fade = 1.0f - 0.6f * std::min(1.0f, std::fabs(coverOffset) / cover);
+    drawNpCover(Area{ coverX + coverOffset, y, cover, cover }, track, fade);
+
+    // after a tap: briefly show what happened (playing or paused)
+    if (coverFlash > 0.0f) {
+        coverFlash -= dt;
+        float a = std::clamp(coverFlash / 0.3f, 0.0f, 1.0f);
+        float cx = coverX + cover / 2;
+        float cy = y + cover / 2;
+        dl->AddCircleFilled(ImVec2(cx, cy), 44.0f, col(0x000000, 0.5f * a));
+        if (player.isPlaying()) icon::play(dl, cx + 3, cy, 40.0f, col(palette::text, a));
+        else icon::pause(dl, cx, cy, 40.0f, col(palette::text, a));
+    }
     y += cover + 22;
 
     // --- title + artist
@@ -779,9 +832,7 @@ void UI::drawNowPlaying(Player& player, Library& library, Area screen) {
     // --- closing: tap the chevron, or pull the screen down
     if (!input) return;
     if (tapped(closeButton)) sheetOpen = false;
-    bool grabbable = touch.startY < progress.y - 4;   // not on the time bar or buttons
-    if (touch.down && touch.moved && grabbable && !seeking && touch.y > touch.startY) sheetDragging = true;
-    if (sheetDragging) {
+    if (gesture == SheetGesture::PullDown) {
         if (touch.down) sheetDrag = std::max(0.0f, touch.y - touch.startY);
         else {
             if (sheetDrag > 120.0f) {
@@ -790,26 +841,28 @@ void UI::drawNowPlaying(Player& player, Library& library, Area screen) {
                 sheetSlide = std::clamp(1.0f - sheetDrag / screen.h, 0.0f, 1.0f);
             }
             sheetDrag = 0.0f;
-            sheetDragging = false;
+            gesture = SheetGesture::None;
         }
     }
+    if (!touch.down && gesture == SheetGesture::Ignored) gesture = SheetGesture::None;
 }
 
-void UI::drawNpCover(Area a, const Track& track) {
+void UI::drawNpCover(Area a, const Track& track, float alpha) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     // crimson glow behind the cover
     for (int i = 12; i >= 1; i--) {
         float g = i * 2.5f;
-        dl->AddRectFilled(ImVec2(a.x - g, a.y - g + 6), ImVec2(a.x + a.w + g, a.y + a.h + g + 6), col(palette::crimson, 0.022f), 16.0f + g);
+        dl->AddRectFilled(ImVec2(a.x - g, a.y - g + 6), ImVec2(a.x + a.w + g, a.y + a.h + g + 6), col(palette::crimson, 0.022f * alpha), 16.0f + g);
     }
     bigCovers.request(track.file);
     SDL_Texture* tex = bigCovers.get(track.file);
     if (tex != nullptr) {
-        dl->AddImageRounded((ImTextureID)(intptr_t)tex, ImVec2(a.x, a.y), ImVec2(a.x + a.w, a.y + a.h), ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, 16.0f);
+        ImU32 tint = IM_COL32(255, 255, 255, static_cast<int>(255 * alpha));
+        dl->AddImageRounded((ImTextureID)(intptr_t)tex, ImVec2(a.x, a.y), ImVec2(a.x + a.w, a.y + a.h), ImVec2(0, 0), ImVec2(1, 1), tint, 16.0f);
     }
     else {
-        dl->AddRectFilled(ImVec2(a.x, a.y), ImVec2(a.x + a.w, a.y + a.h), col(palette::surface), 16.0f);
-        icon::note(dl, a.x + a.w / 2, a.y + a.h / 2, a.w * 0.3f, col(palette::muted));
+        dl->AddRectFilled(ImVec2(a.x, a.y), ImVec2(a.x + a.w, a.y + a.h), col(palette::surface, alpha), 16.0f);
+        icon::note(dl, a.x + a.w / 2, a.y + a.h / 2, a.w * 0.3f, col(palette::muted, alpha));
     }
 }
 
