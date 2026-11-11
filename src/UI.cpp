@@ -754,7 +754,13 @@ void UI::drawNowPlaying(Player& player, Library& library, Area screen) {
     float cover = std::clamp(bottom - y - titleH - progressH - controlsH - minLyrics - 24, 140.0f, w);
     float coverX = x + (w - cover) / 2;
     Area coverArea{ coverX, y, cover, cover };
-    float progressTop = y + cover + 22 + titleH;
+    // Order from top to bottom: cover, lyrics, title, time bar, buttons.
+    // The lyrics get whatever height is left over.
+    const float lyricsGap = 14, titleGap = 10;
+    float lyricsTop = y + cover + lyricsGap;
+    float lyricsH = bottom - 8 - lyricsTop - titleGap - titleH - progressH - controlsH;
+    float titleTop = lyricsTop + lyricsH + titleGap;
+    float progressTop = titleTop + titleH;
 
     // --- gestures, decided once the finger has moved far enough:
     //   sideways on the cover            -> next / previous song
@@ -813,21 +819,18 @@ void UI::drawNowPlaying(Player& player, Library& library, Area screen) {
         if (player.isPlaying()) icon::play(dl, cx + 3, cy, 40.0f, col(palette::text, a));
         else icon::pause(dl, cx, cy, 40.0f, col(palette::text, a));
     }
-    y += cover + 22;
+
+    // --- lyrics, right under the cover
+    drawNpLyrics(player, track, Area{ screen.x, lyricsTop, screen.w, lyricsH });
 
     // --- title + artist
-    drawText(dl, fontBold, 24.0f, x, y, col(palette::text), fitText(fontBold, 24.0f, track.title, w).c_str());
-    drawText(dl, fontRegular, 17.0f, x, y + 32, col(palette::subtle), fitText(fontRegular, 17.0f, track.artist, w).c_str());
-    y += titleH;
+    drawText(dl, fontBold, 24.0f, x, titleTop, col(palette::text), fitText(fontBold, 24.0f, track.title, w).c_str());
+    drawText(dl, fontRegular, 17.0f, x, titleTop + 32, col(palette::subtle), fitText(fontRegular, 17.0f, track.artist, w).c_str());
 
-    Area progress{ x, y, w, progressH };
+    Area progress{ x, progressTop, w, progressH };
     drawNpProgress(player, progress, input);
-    y += progressH;
 
-    drawNpControls(player, library, Area{ x, y, w, controlsH }, input);
-    y += controlsH;
-
-    drawNpLyrics(player, track, Area{ screen.x, y, screen.w, bottom - y - 8 });
+    drawNpControls(player, library, Area{ x, progressTop + progressH, w, controlsH }, input);
 
     // --- closing: tap the chevron, or pull the screen down
     if (!input) return;
