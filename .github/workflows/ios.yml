@@ -1,0 +1,57 @@
+# Builds the iPhone app on a Mac in the cloud and publishes crimmusic.ipa.
+# Runs on every push to main, or by hand from the Actions tab ("Run workflow").
+name: Build iOS app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to upload the .ipa to the "latest" release
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (CMake, Xcode project for iPhone)
+        run: |
+          cmake -S . -B build-ios -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0
+
+      - name: Build
+        run: |
+          cmake --build build-ios --config Release -- \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Add app icon and package .ipa
+        run: |
+          APP=build-ios/Release-iphoneos/crimmusic.app
+          ls "$APP"
+          # sips is a macOS image tool; iOS wants the icon at these exact sizes.
+          sips -z 120 120 assets/crimmusic.png --out "$APP/AppIcon60x60@2x.png"
+          sips -z 180 180 assets/crimmusic.png --out "$APP/AppIcon60x60@3x.png"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry crimmusic.ipa Payload
+          ls -la crimmusic.ipa
+
+      - name: Keep the .ipa as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crimmusic-ipa
+          path: crimmusic.ipa
+
+      - name: Put the .ipa on the "latest" release (easy to download on the phone)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view latest >/dev/null 2>&1 || \
+            gh release create latest --title "Latest build" --notes "Built automatically from main. Install with SideStore." --prerelease
+          gh release upload latest crimmusic.ipa --clobber
