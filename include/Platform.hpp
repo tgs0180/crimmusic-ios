@@ -27,9 +27,11 @@ namespace platform {
 
     // Simple HTTP GET. The query parameters get URL-encoded for you.
     // Returns the HTTP status code (200, 404, ...) or 0 when there was no answer.
+    // Gives up after timeoutSeconds without any data arriving.
     int httpGet(const std::string& url,
                 const std::vector<std::pair<std::string, std::string>>& query,
-                std::string& body);
+                std::string& body,
+                int timeoutSeconds = 8);
 
     // Extra space to keep clear at the top/bottom of the screen
     // (notch, Dynamic Island, home indicator), in points.

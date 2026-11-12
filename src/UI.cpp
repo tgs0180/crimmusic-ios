@@ -165,6 +165,34 @@ namespace icon {
         dl->AddPolyline(points, 3, c, 0, std::max(2.0f, size * 0.1f));
     }
 
+    static void chevronLeft(ImDrawList* dl, float cx, float cy, float size, ImU32 c) {
+        Grid g{cx, cy, size / 24.0f};
+        ImVec2 points[3] = { g(15, 5), g(8, 12), g(15, 19) };
+        dl->AddPolyline(points, 3, c, 0, std::max(2.0f, size * 0.1f));
+    }
+
+    static void download(ImDrawList* dl, float cx, float cy, float size, ImU32 c) {
+        Grid g{cx, cy, size / 24.0f};
+        float w = std::max(1.5f, size * 0.09f);
+        dl->AddLine(g(12, 3), g(12, 15), c, w);
+        ImVec2 head[3] = { g(7, 10), g(12, 15), g(17, 10) };
+        dl->AddPolyline(head, 3, c, 0, w);
+        dl->AddLine(g(4, 20), g(20, 20), c, w);
+    }
+
+    static void check(ImDrawList* dl, float cx, float cy, float size, ImU32 c) {
+        Grid g{cx, cy, size / 24.0f};
+        ImVec2 points[3] = { g(4, 12.5f), g(9.5f, 18), g(20, 6) };
+        dl->AddPolyline(points, 3, c, 0, std::max(2.0f, size * 0.1f));
+    }
+
+    // A turning piece of a circle, for "busy".
+    static void spinner(ImDrawList* dl, float cx, float cy, float size, ImU32 c) {
+        float t = static_cast<float>(ImGui::GetTime()) * 6.0f;
+        dl->PathArcTo(ImVec2(cx, cy), size * 0.4f, t, t + 4.2f);
+        dl->PathStroke(c, 0, std::max(2.0f, size * 0.1f));
+    }
+
     static void note(ImDrawList* dl, float cx, float cy, float size, ImU32 c) {
         Grid g{cx, cy, size / 24.0f};
         float s = size / 24.0f;
@@ -350,6 +378,13 @@ void UI::draw(Player& player, Library& library) {
     bigCovers.update(renderer);
     lyrics.update();
 
+    // A song from SoundCloud/YouTube finished downloading: add it to the list.
+    std::string downloaded = online.takeFinishedDownload();
+    if (!downloaded.empty()) {
+        rescanRequested = true;
+        showToast(fitText(fontSemiBold, 15.0f, "Downloaded " + downloaded, 300.0f));
+    }
+
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
 
@@ -428,8 +463,13 @@ void UI::drawLibrary(Player& player, Library& library, Area content, float botto
     drawHeader(library, Area{ content.x, content.y, content.w, headerHeight }, input);
     Area list{ content.x, content.y + headerHeight, content.w, bottom - (content.y + headerHeight) };
 
+    if (onlineOpen) {
+        drawOnline(list, input);
+        return;
+    }
     if (library.empty()) {
-        drawEmpty(list, "No songs yet", "Tap + to import MP3s, or copy them into\nFiles > On My iPhone > crimmusic");
+        if (searchText[0] != '\0') drawSearchButtons(Area{ list.x, list.y, list.w, searchButtonsHeight }, input);
+        else drawEmpty(list, "No songs yet", "Tap + to import MP3s, search SoundCloud/YouTube\nabove, or copy them into Files > On My iPhone");
         return;
     }
     drawSongList(player, library, list, input);
@@ -469,7 +509,11 @@ void UI::drawHeader(Library& library, Area a, bool input) {
         ImGui::SetCursorScreenPos(ImVec2(textX, field.y + (field.h - ImGui::GetFrameHeight()) / 2));
         ImGui::SetNextItemWidth(textW);
         ImGui::PushStyleColor(ImGuiCol_TextDisabled, hexColor(palette::muted));
-        ImGui::InputTextWithHint("##search", "Search songs or artists", searchText, sizeof(searchText));
+        // Enter on the keyboard searches again while the online results are open.
+        if (ImGui::InputTextWithHint("##search", "Search songs or artists", searchText, sizeof(searchText), ImGuiInputTextFlags_EnterReturnsTrue) &&
+            onlineOpen && searchText[0] != '\0') {
+            startOnlineSearch(online.snapshot().source);
+        }
         ImGui::PopStyleColor();
         ImGui::PopFont();
     }
@@ -487,6 +531,8 @@ void UI::drawHeader(Library& library, Area a, bool input) {
         if (input && tapped(Area{ cx - 20, field.y, 40, field.h })) {
             searchText[0] = '\0';
             scroll = 0.0f;
+            onlineOpen = false;
+            online.clear();
         }
     }
 }
@@ -512,25 +558,11 @@ void UI::drawEmpty(Area a, const char* title, const char* text) {
     }
 }
 
-void UI::drawSongList(Player& player, Library& library, Area a, bool input) {
-    ImDrawList* dl = ImGui::GetWindowDrawList();
+// Finger scrolling for a list: drag, then let it glide and slow down.
+// (Used by the song list and the online results.) Returns the furthest it can scroll.
+float UI::updateScroll(Area a, float contentHeight, bool input) {
     float dt = std::min(ImGui::GetIO().DeltaTime, 0.05f);
-
-    // Which songs match the search?
-    std::string query = toLower(searchText);
-    std::vector<std::size_t> shown;
-    shown.reserve(library.size());
-    for (std::size_t i = 0; i < library.size(); i++) {
-        const Track& t = library.song(i);
-        if (query.empty() || toLower(t.title + " " + t.artist).find(query) != std::string::npos) shown.push_back(i);
-    }
-
-    const float buttonsHeight = 64.0f;
-    const float rowHeight = 64.0f;
-    float contentHeight = buttonsHeight + rowHeight * shown.size() + 8.0f;
     float maxScroll = std::max(0.0f, contentHeight - a.h);
-
-    // --- scrolling: drag with the finger, then let it glide and slow down
     if (input && touch.pressed && a.contains(touch.x, touch.y)) {
         scrollTouch = true;
         scrollStart = scroll;
@@ -550,6 +582,26 @@ void UI::drawSongList(Player& player, Library& library, Area a, bool input) {
     if (input && a.contains(touch.x, touch.y)) scroll -= ImGui::GetIO().MouseWheel * 80.0f; // desktop mouse wheel
     if (scroll < 0.0f || scroll > maxScroll) scrollVelocity = 0.0f;
     scroll = std::clamp(scroll, 0.0f, maxScroll);
+    return maxScroll;
+}
+
+void UI::drawSongList(Player& player, Library& library, Area a, bool input) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    // Which songs match the search?
+    std::string query = toLower(searchText);
+    std::vector<std::size_t> shown;
+    shown.reserve(library.size());
+    for (std::size_t i = 0; i < library.size(); i++) {
+        const Track& t = library.song(i);
+        if (query.empty() || toLower(t.title + " " + t.artist).find(query) != std::string::npos) shown.push_back(i);
+    }
+
+    const float buttonsHeight = 64.0f;
+    const float rowHeight = 64.0f;
+    bool hasQuery = !query.empty();
+    float contentHeight = buttonsHeight + rowHeight * shown.size() + 8.0f + (hasQuery ? searchButtonsHeight : 0.0f);
+    float maxScroll = updateScroll(a, contentHeight, input);
 
     dl->PushClipRect(ImVec2(a.x, a.y), ImVec2(a.x + a.w, a.y + a.h), true);
     float top = a.y - scroll;
@@ -589,6 +641,7 @@ void UI::drawSongList(Player& player, Library& library, Area a, bool input) {
         std::string message = std::string("Nothing matches \"") + searchText + "\"";
         message = fitText(fontRegular, 15.0f, message, a.w - 40);
         drawText(dl, fontRegular, 15.0f, a.x + (a.w - textWidth(fontRegular, 15.0f, message.c_str())) / 2, a.y + buttonsHeight + 30, col(palette::subtle), message.c_str());
+        drawSearchButtons(Area{ a.x, a.y + buttonsHeight + 64, a.w, searchButtonsHeight }, input);
         return;
     }
 
@@ -640,6 +693,8 @@ void UI::drawSongList(Player& player, Library& library, Area a, bool input) {
             else playback::playIndex(player, library, index);
         }
     }
+    // "Search SoundCloud / YouTube" under the last song
+    if (hasQuery) drawSearchButtons(Area{ a.x, rowsTop + shown.size() * rowHeight + 8, a.w, searchButtonsHeight }, input && a.contains(touch.x, touch.y));
     dl->PopClipRect();
 
     // small scroll indicator while moving
@@ -648,6 +703,158 @@ void UI::drawSongList(Player& player, Library& library, Area a, bool input) {
         float barY = a.y + (a.h - barH) * (scroll / maxScroll);
         dl->AddRectFilled(ImVec2(a.x + a.w - 5, barY), ImVec2(a.x + a.w - 2, barY + barH), col(palette::muted, 0.8f), 2.0f);
     }
+}
+
+// ------------------------------------------------------------------ online search
+// "Not in your library?" + two buttons, shown under the search results.
+void UI::drawSearchButtons(Area a, bool input) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const char* caption = "Search online";
+    drawText(dl, fontSemiBold, 14.0f, a.x + 20, a.y + 8, col(palette::subtle), caption);
+
+    float gap = 12.0f;
+    float w = (a.w - 32 - gap) / 2;
+    for (int b = 0; b < 2; b++) {
+        Area button{ a.x + 16 + b * (w + gap), a.y + 36, w, 44 };
+        bool held = input && touch.down && !touch.moved && button.contains(touch.startX, touch.startY);
+        dl->AddRectFilled(ImVec2(button.x, button.y), ImVec2(button.x + button.w, button.y + button.h), col(held ? palette::overlay : palette::surface), 12.0f);
+        const char* label = b == 0 ? "SoundCloud" : "YouTube";
+        float labelW = textWidth(fontSemiBold, 16.0f, label);
+        float groupW = 20 + 8 + labelW;
+        float gx = button.x + (button.w - groupW) / 2;
+        float cy = button.y + button.h / 2;
+        icon::search(dl, gx + 10, cy, 18.0f, col(palette::crimson));
+        drawText(dl, fontSemiBold, 16.0f, gx + 28, cy - 9, col(palette::crimson), label);
+        if (input && tapped(button)) startOnlineSearch(b == 0 ? Source::SoundCloud : Source::YouTube);
+    }
+}
+
+void UI::startOnlineSearch(Source source) {
+    if (searchText[0] == '\0') return;
+    online.startSearch(searchText, source);
+    onlineOpen = true;
+    scroll = 0.0f;
+    scrollVelocity = 0.0f;
+}
+
+// The online results: a back button, the server address, then the songs.
+void UI::drawOnline(Area a, bool input) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    OnlineSnapshot snap = online.snapshot();
+    const float side = 16.0f;
+    const char* sourceName = snap.source == Source::YouTube ? "YouTube" : "SoundCloud";
+
+    // --- top bar: "< Library" and where we searched
+    Area back{ a.x, a.y, 130, 40 };
+    bool backHeld = input && touch.down && !touch.moved && back.contains(touch.startX, touch.startY);
+    ImU32 backColour = col(backHeld ? palette::pink : palette::crimson);
+    icon::chevronLeft(dl, a.x + side + 8, a.y + 20, 22.0f, backColour);
+    drawText(dl, fontSemiBold, 16.0f, a.x + side + 22, a.y + 11, backColour, "Library");
+    drawText(dl, fontSemiBold, 14.0f, a.x + a.w - side - textWidth(fontSemiBold, 14.0f, sourceName), a.y + 13, col(palette::subtle), sourceName);
+    if (input && tapped(back)) {
+        onlineOpen = false;
+        online.clear();
+        scroll = 0.0f;
+        return;
+    }
+
+    // --- server address (where crimserver runs on the PC)
+    if (!serverTextLoaded) {
+        std::snprintf(serverText, sizeof(serverText), "%s", online.server().c_str());
+        serverTextLoaded = true;
+    }
+    Area field{ a.x + side, a.y + 44, a.w - side * 2, 36 };
+    dl->AddRectFilled(ImVec2(field.x, field.y), ImVec2(field.x + field.w, field.y + field.h), col(palette::surface), 10.0f);
+    drawText(dl, fontSemiBold, 14.0f, field.x + 12, field.y + 9, col(palette::subtle), "Server");
+    float textX = field.x + 70;
+    float textW = field.w - 70 - 10;
+    if (input) {
+        ImGui::PushFont(fontRegular, 15.0f);
+        ImGui::SetCursorScreenPos(ImVec2(textX, field.y + (field.h - ImGui::GetFrameHeight()) / 2));
+        ImGui::SetNextItemWidth(textW);
+        ImGui::PushStyleColor(ImGuiCol_TextDisabled, hexColor(palette::muted));
+        ImGui::InputTextWithHint("##server", "192.168.1.20:8765", serverText, sizeof(serverText));
+        // Save it once you're done typing, and search again with the new address.
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            online.setServer(serverText);
+            std::snprintf(serverText, sizeof(serverText), "%s", online.server().c_str());
+            startOnlineSearch(snap.source);
+        }
+        ImGui::PopStyleColor();
+        ImGui::PopFont();
+    }
+    else {
+        bool empty = serverText[0] == '\0';
+        drawText(dl, fontRegular, 15.0f, textX, field.y + 9, col(empty ? palette::muted : palette::text),
+                 fitText(fontRegular, 15.0f, empty ? "192.168.1.20:8765" : serverText, textW).c_str());
+    }
+
+    Area list{ a.x, a.y + 88, a.w, a.h - 88 };
+    float cx = list.x + list.w / 2;
+
+    // --- busy / error / nothing found
+    if (snap.state == SearchState::Searching) {
+        icon::spinner(dl, cx, list.y + 50, 32.0f, col(palette::crimson));
+        std::string text = std::string("Searching ") + sourceName + "...";
+        drawText(dl, fontRegular, 15.0f, cx - textWidth(fontRegular, 15.0f, text.c_str()) / 2, list.y + 80, col(palette::subtle), text.c_str());
+        return;
+    }
+    if (snap.state == SearchState::Error || (snap.state == SearchState::Results && snap.results.empty())) {
+        std::string text = snap.state == SearchState::Error ? snap.error : "Nothing found for \"" + snap.query + "\"";
+        text = fitText(fontRegular, 15.0f, text, list.w - 40);
+        drawText(dl, fontRegular, 15.0f, cx - textWidth(fontRegular, 15.0f, text.c_str()) / 2, list.y + 30, col(palette::subtle), text.c_str());
+        Area retry{ cx - 70, list.y + 64, 140, 44 };
+        bool held = input && touch.down && !touch.moved && retry.contains(touch.startX, touch.startY);
+        dl->AddRectFilled(ImVec2(retry.x, retry.y), ImVec2(retry.x + retry.w, retry.y + retry.h), col(held ? palette::overlay : palette::surface), 12.0f);
+        drawText(dl, fontSemiBold, 16.0f, cx - textWidth(fontSemiBold, 16.0f, "Try again") / 2, retry.y + 12, col(palette::crimson), "Try again");
+        if (input && tapped(retry)) startOnlineSearch(snap.source);
+        return;
+    }
+    if (snap.state != SearchState::Results) return;
+
+    // --- results: tap one to download it into the library
+    const float rowHeight = 64.0f;
+    updateScroll(list, rowHeight * snap.results.size() + 8.0f, input);
+    dl->PushClipRect(ImVec2(list.x, list.y), ImVec2(list.x + list.w, list.y + list.h), true);
+    for (std::size_t k = 0; k < snap.results.size(); k++) {
+        const RemoteTrack& track = snap.results[k];
+        Area row{ list.x, list.y - scroll + k * rowHeight, list.w, rowHeight };
+        if (row.y + row.h < list.y || row.y > list.y + list.h) continue;
+
+        const Download* download = nullptr;
+        for (const Download& d : snap.downloads) {
+            if (d.url == track.url) download = &d;
+        }
+
+        bool held = input && touch.down && !touch.moved && row.contains(touch.startX, touch.startY) && list.contains(touch.startX, touch.startY);
+        if (held) dl->AddRectFilled(ImVec2(row.x, row.y), ImVec2(row.x + row.w, row.y + row.h), col(palette::surface));
+
+        // title, then "uploader · 3:45"
+        float tx = row.x + 20;
+        float tw = row.w - 20 - 56;
+        char length[16];
+        formatTime(track.duration, length, sizeof(length));
+        std::string details = track.uploader + "  \xC2\xB7  " + length;
+        drawText(dl, fontSemiBold, 16.0f, tx, row.y + 13, col(palette::text), fitText(fontSemiBold, 16.0f, track.title, tw).c_str());
+        drawText(dl, fontRegular, 14.0f, tx, row.y + 35, col(palette::subtle), fitText(fontRegular, 14.0f, details, tw).c_str());
+
+        // what's happening with this song on the right
+        float ix = row.x + row.w - 32;
+        float iy = row.y + rowHeight / 2;
+        if (download == nullptr) icon::download(dl, ix, iy, 22.0f, col(palette::crimson));
+        else if (download->state == DownloadState::Downloading) icon::spinner(dl, ix, iy, 24.0f, col(palette::crimson));
+        else if (download->state == DownloadState::Done) icon::check(dl, ix, iy, 22.0f, col(palette::subtle));
+        else icon::cross(dl, ix, iy, 20.0f, col(palette::bright)); // failed: tap to try again
+
+        if (k + 1 < snap.results.size()) {
+            dl->AddLine(ImVec2(tx, row.y + rowHeight - 0.5f), ImVec2(row.x + row.w, row.y + rowHeight - 0.5f), col(palette::overlay), 1.0f);
+        }
+        if (input && tapped(row) && list.contains(touch.x, touch.y)) {
+            if (download == nullptr) showToast("Downloading...");
+            online.startDownload(track);
+        }
+    }
+    dl->PopClipRect();
 }
 
 void UI::drawMiniPlayer(Player& player, Library& library, Area a, bool input) {

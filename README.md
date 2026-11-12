@@ -11,7 +11,9 @@ The iPhone version of [crimmusic](https://github.com/tgs0180/crimmusic): a music
 - **Lyrics** are downloaded from [lrclib.net](https://lrclib.net) and saved as a `.lrc` file next to the song. You can also copy `.lrc` files from the desktop version into the same folder.
 - **Lock screen and Control Center:** title, artist, cover, play/pause, next/previous and the time bar. It keeps playing in the background, and pauses when headphones are unplugged.
 
-Left out compared to desktop: SoundCloud/YouTube, Discord status, and making/editing lyrics.
+- **SoundCloud / YouTube search:** type in the search box, then tap *SoundCloud* or *YouTube* under the results. Tap a song to download it as MP3. This needs **crimserver** running on your PC (see below), because an iPhone app can't run yt-dlp itself.
+
+Left out compared to desktop: Discord status, and making/editing lyrics.
 
 ## How the code is organised
 | File | What it does |
@@ -21,6 +23,8 @@ Left out compared to desktop: SoundCloud/YouTube, Discord status, and making/edi
 | `src/Player.cpp` | Plays audio with miniaudio |
 | `src/Library.cpp` | Finds the MP3s and reads their tags (TagLib) |
 | `src/Lyrics.cpp` | Finds and parses synced lyrics |
+| `src/Online.cpp` | SoundCloud/YouTube search and downloads, through crimserver |
+| `server/crimserver.py` | Runs on the PC: does the searching and downloading with yt-dlp + ffmpeg |
 | `src/CoverCache.cpp` | Loads covers in the background |
 | `include/Playback.hpp` | Next / previous / play-pause, shared by the UI and the lock screen |
 | `include/Platform.hpp` | Things that differ per platform (folders, file picker, HTTP, safe area) |
@@ -45,3 +49,12 @@ The first configure downloads SDL3, Dear ImGui and TagLib, so it takes a minute.
 3. Open it with **SideStore** to install. Like other sideloaded apps, it needs refreshing every 7 days.
 
 Why a Mac in the cloud: iOS apps can only be built with Apple's Xcode, which only runs on macOS.
+
+## crimserver (SoundCloud / YouTube on the phone)
+iOS doesn't let apps start other programs, so the phone can't run yt-dlp. Instead it asks a tiny server on your PC to do it.
+
+1. On the PC (needs `yt-dlp` and `ffmpeg`): `python3 server/crimserver.py` (port 8765, or give another port as argument).
+2. Let the phone reach that port through the PC's firewall.
+3. In the app, search, tap *SoundCloud* or *YouTube*, and fill in **Server** with the PC's address, like `192.168.1.20:8765`. It's remembered.
+
+The phone and PC must be on the same network (or connected with a VPN like Tailscale). Anyone on your network can use the server while it runs.

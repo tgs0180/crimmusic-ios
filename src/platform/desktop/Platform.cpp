@@ -65,9 +65,9 @@ int takeImportedCount() {
     return imported.exchange(0);
 }
 
-int httpGet(const std::string& url, const std::vector<std::pair<std::string, std::string>>& query, std::string& body) {
+int httpGet(const std::string& url, const std::vector<std::pair<std::string, std::string>>& query, std::string& body, int timeoutSeconds) {
     // Same trick as desktop crimmusic: run the curl program.
-    std::vector<std::string> args = { "curl", "-s", "-m", "8", "-A", "crimmusic (https://github.com/tgs0180/crimmusic)",
+    std::vector<std::string> args = { "curl", "-s", "-m", std::to_string(timeoutSeconds), "-A", "crimmusic (https://github.com/tgs0180/crimmusic)",
                                       "-w", "\n%{http_code}", "-G", url };
     for (const auto& [key, value] : query) {
         args.push_back("--data-urlencode");

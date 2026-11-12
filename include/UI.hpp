@@ -5,6 +5,7 @@
 #include <vector>
 #include "CoverCache.hpp"
 #include "Lyrics.hpp"
+#include "Online.hpp"
 #include "Track.hpp"
 
 class Player;
@@ -78,6 +79,17 @@ class UI {
         void drawEmpty(Area a, const char* title, const char* text);
         void drawMiniPlayer(Player& player, Library& library, Area a, bool input);
         void drawToast(Area above);
+        float updateScroll(Area a, float contentHeight, bool input);
+
+        // online search (SoundCloud / YouTube through crimserver on the PC)
+        Online online;
+        bool onlineOpen = false;
+        char serverText[128] = "";
+        bool serverTextLoaded = false;
+        static constexpr float searchButtonsHeight = 92.0f;
+        void drawSearchButtons(Area a, bool input);
+        void startOnlineSearch(Source source);
+        void drawOnline(Area a, bool input);
 
         std::string toast;
         float toastTime = 0.0f;

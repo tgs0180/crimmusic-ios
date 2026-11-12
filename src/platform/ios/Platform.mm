@@ -85,7 +85,7 @@ void showImportPicker(SDL_Window* window) {
 }
 
 // ------------------------------------------------------------------ HTTP
-int httpGet(const std::string& url, const std::vector<std::pair<std::string, std::string>>& query, std::string& body) {
+int httpGet(const std::string& url, const std::vector<std::pair<std::string, std::string>>& query, std::string& body, int timeoutSeconds) {
     @autoreleasepool {
         NSURLComponents* components = [NSURLComponents componentsWithString:[NSString stringWithUTF8String:url.c_str()]];
         NSMutableArray<NSURLQueryItem*>* items = [NSMutableArray array];
@@ -97,7 +97,7 @@ int httpGet(const std::string& url, const std::vector<std::pair<std::string, std
         if (components.URL == nil) return 0;
 
         NSMutableURLRequest* request = [NSMutableURLRequest requestWithURL:components.URL];
-        request.timeoutInterval = 8.0;
+        request.timeoutInterval = timeoutSeconds;
         [request setValue:@"crimmusic-ios (https://github.com/tgs0180/crimmusic)" forHTTPHeaderField:@"User-Agent"];
 
         // NSURLSession is asynchronous, but this runs on the lyrics worker

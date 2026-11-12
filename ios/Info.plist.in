@@ -56,6 +56,16 @@
     <key>LSSupportsOpeningDocumentsInPlace</key>
     <true/>
 
+    <!-- Online search talks to crimserver on the PC over plain http (not https),
+         inside the home network. iOS blocks both unless the app says so here. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>crimmusic searches SoundCloud and YouTube through crimserver on your computer.</string>
+
     <!-- Dark look, portrait only, plain launch screen -->
     <key>UIUserInterfaceStyle</key>
     <string>Dark</string>

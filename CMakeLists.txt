@@ -68,6 +68,7 @@ set(APP_SOURCES
     src/Library.cpp
     src/CoverCache.cpp
     src/Lyrics.cpp
+    src/Online.cpp
     src/miniaudio.cpp
     src/stb_impl.cpp)
 
