@@ -37,6 +37,10 @@ bool Player::play(const std::filesystem::path &file) {
     }
     soundLoaded = true;
     current = file;
+    // Another app (e.g. TikTok) can interrupt our audio. iOS then stops the
+    // whole audio device, not just this song, so turn the device back on too.
+    // If it is already running this does nothing.
+    ma_engine_start(&engine);
     ma_sound_start(&sound);
     return true;
 }
@@ -87,7 +91,9 @@ void Player::pause() {
 }
 
 void Player::resume() {
-    if (soundLoaded) ma_sound_start(&sound);
+    if (!soundLoaded) return;
+    ma_engine_start(&engine); // see play(): the device may have been stopped
+    ma_sound_start(&sound);
 }
 
 void Player::stop() {
